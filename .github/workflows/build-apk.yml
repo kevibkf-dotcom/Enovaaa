@@ -1,0 +1,104 @@
+name: Compilar APK Renova tu mente sin conexión
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar componentes Android
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "No se encontró sdkmanager"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
+
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Verificar ZIP del proyecto
+        run: |
+          if [ ! -f "Renova-tu-mente-GitHub-100-offline-FINAL.zip" ]; then
+            echo "ERROR: No se encontró el ZIP:"
+            echo "Renova-tu-mente-GitHub-100-offline-FINAL.zip"
+            echo ""
+            echo "Archivos encontrados:"
+            ls -lah
+            exit 1
+          fi
+
+      - name: Extraer proyecto
+        run: |
+          rm -rf renova
+          unzip -q "Renova-tu-mente-GitHub-100-offline-FINAL.zip"
+
+      - name: Verificar estructura del proyecto
+        run: |
+          echo "Contenido del proyecto:"
+          find renova -maxdepth 3 -type f | sort
+
+          test -d renova/app || {
+            echo "ERROR: No se encontró renova/app"
+            exit 1
+          }
+
+          test -f renova/settings.gradle || {
+            echo "ERROR: No se encontró renova/settings.gradle"
+            exit 1
+          }
+
+          test -f renova/build.gradle || {
+            echo "ERROR: No se encontró renova/build.gradle"
+            exit 1
+          }
+
+      - name: Preparar contenido offline
+        run: |
+          cd renova
+
+          if [ -f "tools/prepare_bible.py" ]; then
+            python3 tools/prepare_bible.py
+          else
+            echo "No existe tools/prepare_bible.py"
+            echo "Continuando con el contenido incluido."
+          fi
+
+      - name: Compilar APK
+        run: |
+          cd renova
+          gradle assembleDebug --stacktrace
+
+      - name: Verificar APK generada
+        run: |
+          echo "APK generada:"
+          find renova/app/build/outputs/apk/debug -name "*.apk" -type f -print
+
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Renova-tu-mente-APK-sin-conexion
+          path: renova/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
